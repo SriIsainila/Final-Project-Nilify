@@ -20,7 +20,7 @@ def remove_test_users(*emails: str) -> None:
 
 
 async def register_and_login(client: AsyncClient, email: str) -> str:
-    password = "correct-horse-battery"
+    password = "Correct-horse-battery1"
     register = await client.post(
         "/api/auth/register",
         json={"name": "Product Tester", "email": email, "password": password},
@@ -32,6 +32,29 @@ async def register_and_login(client: AsyncClient, email: str) -> str:
     )
     assert login.status_code == 200, login.text
     return login.json()["token"]
+
+
+@pytest.mark.asyncio
+async def test_internal_product_is_baselined_immediately() -> None:
+    email = f"internal-product-{uuid4().hex}@example.com"
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            token = await register_and_login(client, email)
+            client.cookies.clear()
+            created = await client.post(
+                "/api/products",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"url": "http://127.0.0.1:5173/products/premium-chocolate-box"},
+            )
+            assert created.status_code == 201, created.text
+            product = created.json()
+            assert product["name"] == "Premium Chocolate Box"
+            assert product["current_price"] is not None
+            assert product["in_stock"] is not None
+            assert product["last_checked_at"] is not None
+    finally:
+        await engine.dispose()
+        remove_test_users(email)
 
 
 @pytest.mark.asyncio

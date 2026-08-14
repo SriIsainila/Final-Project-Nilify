@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query
 
-from app.routes.dependencies import CurrentUser, DatabaseSession
+from app.routes.dependencies import DatabaseSession, NormalUser
 from app.schemas.notification import (
     DeleteNotificationResponse,
     MarkAllReadResponse,
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/notifications", tags=["Notifications"])
 @router.get("", response_model=list[NotificationRead])
 async def get_notifications(
     session: DatabaseSession,
-    user: CurrentUser,
+    user: NormalUser,
     unread: bool = False,
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
@@ -38,7 +38,7 @@ async def get_notifications(
 @router.get("/unread", response_model=list[NotificationRead])
 async def get_unread_notifications(
     session: DatabaseSession,
-    user: CurrentUser,
+    user: NormalUser,
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> list[NotificationRead]:
@@ -52,7 +52,7 @@ async def get_unread_notifications(
 
 
 @router.patch("/read-all", response_model=MarkAllReadResponse)
-async def read_all(session: DatabaseSession, user: CurrentUser) -> MarkAllReadResponse:
+async def read_all(session: DatabaseSession, user: NormalUser) -> MarkAllReadResponse:
     updated = await mark_all_notifications_read(session, user.user_id)
     return MarkAllReadResponse(updated=updated)
 
@@ -61,7 +61,7 @@ async def read_all(session: DatabaseSession, user: CurrentUser) -> MarkAllReadRe
 async def read_one(
     notification_id: int,
     session: DatabaseSession,
-    user: CurrentUser,
+    user: NormalUser,
 ) -> NotificationStatusResponse:
     notification = await mark_notification_read(session, user.user_id, notification_id)
     return NotificationStatusResponse(id=notification.notification_id, is_read=notification.is_read)
@@ -71,7 +71,7 @@ async def read_one(
 async def remove_notification(
     notification_id: int,
     session: DatabaseSession,
-    user: CurrentUser,
+    user: NormalUser,
 ) -> DeleteNotificationResponse:
     await delete_notification(session, user.user_id, notification_id)
     return DeleteNotificationResponse(message="Notification deleted")

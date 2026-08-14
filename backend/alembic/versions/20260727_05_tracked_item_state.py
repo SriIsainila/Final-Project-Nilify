@@ -42,7 +42,8 @@ def upgrade() -> None:
         name = constraint.get("name")
         sqltext = (constraint.get("sqltext") or "").lower()
         if name and "status" in sqltext:
-            op.drop_constraint(name, "tracked_items", type_="check")
+            quoted_name = bind.dialect.identifier_preparer.quote(name)
+            op.execute(f"ALTER TABLE tracked_items DROP CONSTRAINT IF EXISTS {quoted_name}")
 
     op.create_check_constraint(
         "ck_tracked_items_status",

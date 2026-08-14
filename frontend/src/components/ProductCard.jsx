@@ -1,7 +1,12 @@
-import { Trash2, ExternalLink, TrendingDown } from 'lucide-react'
+import { useState } from 'react'
+import { Trash2, ExternalLink, TrendingDown, Sparkles } from 'lucide-react'
 import { formatPrice } from '../utils/formatters.js'
+import { getAiProductAdvice } from '../services/productService.js'
 
 export default function ProductCard({ product, onDelete }) {
+  const [advice, setAdvice] = useState(null)
+  const [adviceError, setAdviceError] = useState('')
+  const [adviceLoading, setAdviceLoading] = useState(false)
   const {
     name,
     image_url,
@@ -11,10 +16,27 @@ export default function ProductCard({ product, onDelete }) {
     url,
     in_stock = true,
     currency = 'LKR',
+    tracking_error,
   } = product
 
+  const hasCurrentPrice = current_price !== null && current_price !== undefined && current_price !== ''
   const hasTargetPrice = target_price !== null && target_price !== undefined && target_price !== ''
-  const isBelowTarget = hasTargetPrice && Number(current_price) <= Number(target_price)
+  const isBelowTarget = hasCurrentPrice && hasTargetPrice && Number(current_price) <= Number(target_price)
+
+  async function handleAdvice() {
+    setAdviceError('')
+    setAdviceLoading(true)
+    try {
+      setAdvice(await getAiProductAdvice(product.id))
+    } catch (error) {
+      const message = error.message?.includes('timeout')
+        ? 'Gemini is taking too long. Please try again.'
+        : error.message
+      setAdviceError(message || 'Could not generate AI advice.')
+    } finally {
+      setAdviceLoading(false)
+    }
+  }
 
   return (
     <div className="price-tag bg-night-surface border border-ink/10 shadow-sm flex gap-4 p-4 pr-5">
@@ -41,7 +63,7 @@ export default function ProductCard({ product, onDelete }) {
 
         <div className="flex items-center gap-3 mt-2">
           <span className="font-display font-bold text-lg">
-            {formatPrice(current_price, currency)}
+            {hasCurrentPrice ? formatPrice(current_price, currency) : 'Price pending'}
           </span>
           {hasTargetPrice && (
             <span className="text-xs text-muted">target {formatPrice(target_price, currency)}</span>
@@ -51,21 +73,52 @@ export default function ProductCard({ product, onDelete }) {
               <TrendingDown size={12} /> Below target
             </span>
           )}
-          {!in_stock && (
+          {in_stock === false && (
             <span className="text-xs font-medium text-coral bg-coral/10 px-2 py-0.5 rounded-full">
               Out of stock
             </span>
           )}
         </div>
 
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-gold hover:text-gold-soft mt-2 focus-ring rounded"
-        >
-          View product <ExternalLink size={12} />
-        </a>
+        {tracking_error && (
+          <p className="text-xs text-coral mt-2" title={tracking_error}>
+            Tracking issue: {tracking_error}
+          </p>
+        )}
+
+        <div className="flex flex-wrap items-center gap-3 mt-2">
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-gold hover:text-gold-soft focus-ring rounded"
+          >
+            View product <ExternalLink size={12} />
+          </a>
+          <button
+            type="button"
+            onClick={handleAdvice}
+            disabled={adviceLoading}
+            className="inline-flex items-center gap-1 text-xs font-medium text-ink hover:text-gold disabled:opacity-60 focus-ring rounded"
+          >
+            <Sparkles size={12} /> {adviceLoading ? 'Thinking…' : 'Buy or wait?'}
+          </button>
+        </div>
+
+        {adviceError && <p className="text-xs text-coral mt-2">{adviceError}</p>}
+        {advice && (
+          <div className="mt-3 rounded-lg bg-night-surface-2 p-3 text-xs">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="font-semibold capitalize text-mint">{advice.recommendation}</span>
+              <span className="text-muted">{advice.confidence} confidence</span>
+            </div>
+            <p className="text-ink">{advice.summary}</p>
+            <ul className="list-disc pl-4 mt-1 text-muted space-y-0.5">
+              {advice.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+            </ul>
+            <p className="text-muted mt-2 italic">{advice.disclaimer}</p>
+          </div>
+        )}
       </div>
     </div>
   )

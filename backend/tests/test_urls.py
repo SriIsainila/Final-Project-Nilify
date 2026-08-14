@@ -16,6 +16,14 @@ def test_normalizes_international_domain_names() -> None:
     )
 
 
+def test_allows_only_nilify_internal_catalog_urls() -> None:
+    assert normalize_product_url(
+        "http://127.0.0.1:5173/products/wooden-building-blocks/"
+    ) == "http://127.0.0.1:5173/products/wooden-building-blocks"
+    with pytest.raises(ApplicationError):
+        normalize_product_url("http://127.0.0.1:5173/admin/products")
+
+
 @pytest.mark.parametrize(
     "url",
     [

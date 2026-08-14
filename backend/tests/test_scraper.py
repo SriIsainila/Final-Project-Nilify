@@ -5,10 +5,36 @@ import pytest
 
 from app.core.exceptions import ApplicationError
 from app.services.scraper import extract_product, parse_price, scrape_product
+from app.services import scraper as scraper_module
 
 
 async def public_resolver(_: str) -> list[str]:
     return ["93.184.216.34"]
+
+
+@pytest.mark.asyncio
+async def test_hostname_resolution_retries_transient_dns_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+
+    class FakeLoop:
+        async def getaddrinfo(self, *_args, **_kwargs):
+            nonlocal attempts
+            attempts += 1
+            if attempts < 3:
+                raise OSError("temporary DNS failure")
+            return [(None, None, None, None, ("93.184.216.34", 0))]
+
+    monkeypatch.setattr(scraper_module.asyncio, "get_running_loop", lambda: FakeLoop())
+    monkeypatch.setattr(scraper_module.asyncio, "sleep", lambda _delay: _no_wait())
+
+    assert await scraper_module.resolve_hostname("example.com") == ["93.184.216.34"]
+    assert attempts == 3
+
+
+async def _no_wait() -> None:
+    return None
 
 
 def test_extracts_json_ld_product_and_variants() -> None:
@@ -119,6 +145,53 @@ def test_extracts_nested_json_ld_and_visible_stock_text() -> None:
     assert product.in_stock is False
 
 
+def test_extracts_daraz_style_embedded_page_price() -> None:
+    html = """
+    <html><head>
+      <meta property="og:title" content="Portable Handheld Fan">
+      <meta property="og:image" content="https://example.com/fan.jpg">
+      <script>
+        window.pageData = {"pdt_name":"Portable Handheld Fan","pdt_price":"Rs. 2,490"};
+      </script>
+    </head></html>
+    """
+
+    product = extract_product(html, "https://www.daraz.lk/products/fan.html")
+
+    assert product.price == Decimal("2490")
+    assert product.title == "Portable Handheld Fan"
+
+
+def test_extracts_data_price_fallback() -> None:
+    product = extract_product(
+        '<html><body><div data-product-price="LKR 12,500.00"></div></body></html>',
+        "https://example.com/product",
+    )
+
+    assert product.price == Decimal("12500.00")
+
+
+def test_extracts_amazon_storefront_fields_without_json_ld() -> None:
+    html = """
+    <html><body>
+      <span id="productTitle">Wireless Mouse</span>
+      <div id="corePrice_feature_div">
+        <span class="a-price"><span class="a-offscreen">$24.99</span></span>
+      </div>
+      <img id="landingImage" data-old-hires="https://images.example.com/mouse.jpg">
+      <div id="availability"><span>In Stock</span></div>
+    </body></html>
+    """
+
+    product = extract_product(html, "https://www.amazon.com/dp/B000000000")
+
+    assert product.title == "Wireless Mouse"
+    assert product.price == Decimal("24.99")
+    assert product.currency == "USD"
+    assert product.image_url == "https://images.example.com/mouse.jpg"
+    assert product.in_stock is True
+
+
 @pytest.mark.asyncio
 async def test_scrapes_html_with_injected_http_client() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -154,6 +227,29 @@ async def test_validates_redirect_targets() -> None:
                 resolver=public_resolver,
             )
     assert caught.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_preserves_required_trailing_slash_after_redirect() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/product":
+            return httpx.Response(301, headers={"location": "/product/"}, request=request)
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/html"},
+            text="<html><title>Slash Product</title></html>",
+            request=request,
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        product = await scrape_product(
+            "https://example.com/product",
+            client=client,
+            resolver=public_resolver,
+        )
+
+    assert product.title == "Slash Product"
+    assert product.final_url == "https://example.com/product/"
 
 
 @pytest.mark.asyncio

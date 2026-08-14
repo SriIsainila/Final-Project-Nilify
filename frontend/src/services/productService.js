@@ -34,3 +34,14 @@ export async function disableTracking(productId) {
   const { data } = await httpClient.post(`/products/${productId}/disable`)
   return data
 }
+
+export async function getAiProductAdvice(productId) {
+  // Model generation can take longer than ordinary CRUD requests. Keep the
+  // global API timeout short and extend only this AI operation.
+  const { data } = await httpClient.post(
+    `/products/${productId}/ai-advice`,
+    null,
+    { timeout: 45000 },
+  )
+  return data
+}

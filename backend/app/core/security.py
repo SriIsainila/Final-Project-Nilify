@@ -1,5 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any
+import hashlib
+import hmac
 
 import bcrypt
 import jwt
@@ -53,3 +55,40 @@ def decode_access_token(token: str) -> dict[str, Any]:
     if payload.get("type") != "access":
         raise TokenValidationError("Invalid token type")
     return payload
+
+
+def create_password_reset_token(user_id: int, password_hash: str) -> str:
+    now = datetime.now(UTC)
+    fingerprint = hashlib.sha256(password_hash.encode("utf-8")).hexdigest()[:24]
+    return jwt.encode(
+        {
+            "sub": str(user_id),
+            "type": "password_reset",
+            "pwd": fingerprint,
+            "iat": now,
+            "exp": now + timedelta(minutes=settings.password_reset_expire_minutes),
+        },
+        settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+    )
+
+
+def decode_password_reset_token(token: str, password_hash: str) -> int:
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret,
+            algorithms=[settings.jwt_algorithm],
+            options={"require": ["sub", "iat", "exp", "type", "pwd"]},
+        )
+    except InvalidTokenError as error:
+        raise TokenValidationError("Invalid or expired password reset link") from error
+    expected = hashlib.sha256(password_hash.encode("utf-8")).hexdigest()[:24]
+    if payload.get("type") != "password_reset" or not hmac.compare_digest(
+        str(payload.get("pwd", "")), expected
+    ):
+        raise TokenValidationError("Invalid or already used password reset link")
+    try:
+        return int(payload["sub"])
+    except (TypeError, ValueError) as error:
+        raise TokenValidationError("Invalid password reset link") from error

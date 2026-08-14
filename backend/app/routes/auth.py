@@ -4,15 +4,24 @@ from app.routes.dependencies import CurrentUser, DatabaseSession
 from app.core.config import settings
 from app.schemas.user import (
     CurrentUserResponse,
+    ForgotPasswordRequest,
     LoginResponse,
     LogoutResponse,
+    PasswordMessage,
     RegisterResponse,
+    ResetPasswordRequest,
     TokenResponse,
     UserLogin,
     UserRead,
     UserRegister,
 )
-from app.services.auth import authenticate_user, issue_user_token, register_user
+from app.services.auth import (
+    authenticate_user,
+    issue_user_token,
+    register_user,
+    request_password_reset,
+    reset_password,
+)
 
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -61,3 +70,15 @@ async def logout(response: Response) -> LogoutResponse:
         path="/",
     )
     return LogoutResponse(message="Logged out")
+
+
+@router.post("/forgot-password", response_model=PasswordMessage)
+async def forgot_password(payload: ForgotPasswordRequest, session: DatabaseSession) -> PasswordMessage:
+    await request_password_reset(session, payload.email)
+    return PasswordMessage(message="If an account exists for that email, a reset link has been sent.")
+
+
+@router.post("/reset-password", response_model=PasswordMessage)
+async def complete_password_reset(payload: ResetPasswordRequest, session: DatabaseSession) -> PasswordMessage:
+    await reset_password(session, payload.token, payload.password)
+    return PasswordMessage(message="Your password has been reset. You can now log in.")

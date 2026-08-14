@@ -16,11 +16,14 @@ from app.models.item_change import ItemChange
 from app.models.notification import Notification
 from app.models.price_history import PriceHistory
 from app.models.tracked_item import TrackedItem
+from app.models.catalog_product import CatalogProduct
 from app.schemas.scraper import ScrapedProduct
-from app.services.scraper import scrape_product
+from app.services.scraper import content_hash_for, scrape_product
+from app.utils.urls import catalog_slug_from_url
 
 
 Scraper = Callable[[str], Awaitable[ScrapedProduct]]
+NO_CHANGE_NOTIFICATION_INTERVAL = timedelta(hours=12)
 
 
 @dataclass
@@ -71,9 +74,32 @@ def should_notify(change_scope: str, change_type: str) -> bool:
     return change_scope == "all" or change_scope == change_type
 
 
-async def claim_due_items(session: AsyncSession) -> list[int]:
+async def notify_if_unchanged_for_12_hours(
+    session: AsyncSession,
+    item: TrackedItem,
+    now: datetime,
+) -> int:
+    """Create a status notification after every 12-hour period without a change."""
+    interval_started_at = item.no_change_notified_at or item.created_at
+    if now < interval_started_at + NO_CHANGE_NOTIFICATION_INTERVAL:
+        return 0
+
+    session.add(
+        Notification(
+            user_id=item.user_id,
+            item_id=item.item_id,
+            message=f"No changes were detected for {item.title} in the last 12 hours.",
+            channel=item.notify_channel,
+            delivery_status="pending",
+        )
+    )
+    item.no_change_notified_at = now
+    return 1
+
+
+async def claim_due_items(session: AsyncSession, only_item_ids: list[int] | None = None) -> list[int]:
     now = datetime.now(UTC)
-    result = await session.execute(
+    statement = (
         select(TrackedItem)
         .where(
             TrackedItem.status == "active",
@@ -83,6 +109,9 @@ async def claim_due_items(session: AsyncSession) -> list[int]:
         .limit(settings.scheduler_batch_size)
         .with_for_update(skip_locked=True)
     )
+    if only_item_ids is not None:
+        statement = statement.where(TrackedItem.item_id.in_(only_item_ids))
+    result = await session.execute(statement)
     items = list(result.scalars().all())
     for item in items:
         item.next_check_at = now + timedelta(minutes=item.check_frequency)
@@ -103,6 +132,26 @@ async def record_failure(item_id: int, message: str) -> None:
         await session.commit()
 
 
+async def internal_catalog_snapshot(url: str) -> ScrapedProduct | None:
+    slug = catalog_slug_from_url(url)
+    if slug is None:
+        return None
+    async with AsyncSessionFactory() as session:
+        product = await session.scalar(select(CatalogProduct).where(CatalogProduct.slug == slug))
+    if product is None:
+        raise ApplicationError("Nilify product was not found", status_code=404)
+    state = {
+        "title": product.name,
+        "price": product.price,
+        "currency": "LKR",
+        "image_url": product.image_url,
+        "in_stock": product.in_stock,
+        "variants": {"Colour": [product.colour], "Stock quantity": [str(product.stock_quantity)]},
+    }
+    hash_state = {**state, "price": str(product.price)}
+    return ScrapedProduct(**state, content_hash=content_hash_for(hash_state), final_url=url)
+
+
 async def check_tracked_url(item_id: int, scraper: Scraper = scrape_product) -> tuple[int, int]:
     """Fetch one active tracked URL and persist any detected product changes.
 
@@ -116,7 +165,7 @@ async def check_tracked_url(item_id: int, scraper: Scraper = scrape_product) -> 
         url = item.url
 
     try:
-        snapshot = await scraper(url)
+        snapshot = await internal_catalog_snapshot(url) or await scraper(url)
     except ApplicationError as error:
         await record_failure(item_id, error.message)
         raise
@@ -140,8 +189,9 @@ async def check_tracked_url(item_id: int, scraper: Scraper = scrape_product) -> 
             item.last_checked_at = now
             item.failure_count = 0
             item.last_error = None
+            notification_count = await notify_if_unchanged_for_12_hours(session, item, now)
             await session.commit()
-            return 0, 0
+            return 0, notification_count
 
         changes = [] if is_baseline else detected_changes(item, snapshot)
         if snapshot.price is not None and (is_baseline or item.current_price != snapshot.price):
@@ -154,6 +204,9 @@ async def check_tracked_url(item_id: int, scraper: Scraper = scrape_product) -> 
             )
 
         notification_count = 0
+        if changes:
+            # A real change starts a fresh 12-hour unchanged window.
+            item.no_change_notified_at = now
         for change_type, old_value, new_value in changes:
             notify = should_notify(item.change_scope, change_type)
             change = ItemChange(
@@ -170,6 +223,7 @@ async def check_tracked_url(item_id: int, scraper: Scraper = scrape_product) -> 
                     postgresql_insert(Notification)
                     .values(
                         user_id=item.user_id,
+                        item_id=item.item_id,
                         item_change_id=change.change_id,
                         message=notification_message(item, change_type, old_value, new_value),
                         channel=item.notify_channel,
@@ -236,7 +290,10 @@ async def process_active_items(scraper: Scraper = scrape_product) -> WorkerResul
     return await process_item_ids(item_ids, scraper)
 
 
-async def process_due_items(scraper: Scraper = scrape_product) -> WorkerResult:
+async def process_due_items(
+    scraper: Scraper = scrape_product,
+    only_item_ids: list[int] | None = None,
+) -> WorkerResult:
     async with AsyncSessionFactory() as session:
-        item_ids = await claim_due_items(session)
+        item_ids = await claim_due_items(session, only_item_ids)
     return await process_item_ids(item_ids, scraper)

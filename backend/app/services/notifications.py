@@ -1,4 +1,4 @@
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ApplicationError
@@ -21,9 +21,13 @@ def notification_select(user_id: int):
             ItemChange.change_type,
             ItemChange.item_id,
             TrackedItem.title.label("item_title"),
+            TrackedItem.url.label("item_url"),
         )
         .outerjoin(ItemChange, ItemChange.change_id == Notification.item_change_id)
-        .outerjoin(TrackedItem, TrackedItem.item_id == ItemChange.item_id)
+        .outerjoin(
+            TrackedItem,
+            TrackedItem.item_id == func.coalesce(Notification.item_id, ItemChange.item_id),
+        )
         .where(Notification.user_id == user_id)
     )
 
@@ -40,6 +44,7 @@ def row_to_schema(row) -> NotificationRead:
         change_type=row.change_type,
         item_id=row.item_id,
         item_title=row.item_title,
+        item_url=row.item_url,
     )
 
 

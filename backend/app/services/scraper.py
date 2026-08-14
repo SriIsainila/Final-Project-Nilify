@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable, Iterable
 from decimal import Decimal, InvalidOperation
 from socket import AF_UNSPEC, SOCK_STREAM
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 from bs4 import BeautifulSoup
@@ -32,8 +32,27 @@ BLOCK_PAGE_MARKERS = (
 
 async def resolve_hostname(hostname: str) -> list[str]:
     loop = asyncio.get_running_loop()
-    records = await loop.getaddrinfo(hostname, None, family=AF_UNSPEC, type=SOCK_STREAM)
-    return sorted({record[4][0] for record in records})
+    last_error: OSError | None = None
+    # Local DNS services can briefly fail during network changes. Retry before
+    # marking every tracked item as failed for the whole scheduler cycle.
+    for attempt in range(3):
+        try:
+            records = await loop.getaddrinfo(
+                hostname,
+                None,
+                family=AF_UNSPEC,
+                type=SOCK_STREAM,
+            )
+            addresses = sorted({record[4][0] for record in records})
+            if addresses:
+                return addresses
+        except OSError as error:
+            last_error = error
+        if attempt < 2:
+            await asyncio.sleep(0.25 * (2**attempt))
+    if last_error is not None:
+        raise last_error
+    return []
 
 
 async def validate_public_url(value: str, resolver: Resolver = resolve_hostname) -> str:
@@ -50,13 +69,20 @@ async def validate_public_url(value: str, resolver: Resolver = resolve_hostname)
     if not addresses:
         raise ApplicationError("Product website could not be resolved", status_code=400)
 
-    for value in addresses:
+    for resolved_value in addresses:
         try:
-            address = ipaddress.ip_address(value)
+            address = ipaddress.ip_address(resolved_value)
         except ValueError as error:
             raise ApplicationError("Product website resolved to an invalid address", status_code=400) from error
         if not address.is_global:
             raise ApplicationError("Private or local URLs are not allowed", status_code=400)
+    # A trailing slash can be significant to the remote server. The canonical
+    # database URL omits it for duplicate detection, but redirect targets must
+    # retain it to avoid redirect loops such as `/product` -> `/product/`.
+    original_path = urlsplit(value.strip()).path
+    if original_path != "/" and original_path.endswith("/"):
+        normalized_parts = urlsplit(normalized)
+        normalized = normalized_parts._replace(path=f"{normalized_parts.path}/").geturl()
     return normalized
 
 
@@ -128,6 +154,93 @@ def meta_content(soup: BeautifulSoup, *keys: str) -> str | None:
         tag = soup.find("meta", attrs={"property": key}) or soup.find("meta", attrs={"name": key})
         if tag and tag.get("content"):
             return str(tag["content"]).strip()
+    return None
+
+
+def embedded_price(soup: BeautifulSoup) -> Any | None:
+    """Find prices exposed in storefront state when standard product markup is absent."""
+    meta_value = meta_content(
+        soup,
+        "product_price",
+        "product:price",
+        "twitter:data1",
+    )
+    if meta_value is not None and parse_price(meta_value) is not None:
+        return meta_value
+
+    for attribute in ("data-price", "data-product-price", "data-sale-price"):
+        node = soup.find(attrs={attribute: True})
+        if node and parse_price(node.get(attribute)) is not None:
+            return node.get(attribute)
+
+    # Daraz/Lazada and several other SPA storefronts place product details in
+    # serialized page state. Prefer product-specific keys over a generic price.
+    patterns = (
+        r'["\']pdt_price["\']\s*:\s*["\']([^"\']+)',
+        r'["\']salePrice["\']\s*:\s*["\']?([\d][\d,.\s]*)',
+        r'["\']price["\']\s*:\s*["\']([\d][\d,.\s]*)',
+    )
+    for script in soup.find_all("script"):
+        script_text = script.get_text(" ", strip=True)
+        if not script_text:
+            continue
+        for pattern in patterns:
+            match = re.search(pattern, script_text, flags=re.IGNORECASE)
+            if match and parse_price(match.group(1)) is not None:
+                return match.group(1)
+    return None
+
+
+def storefront_text(soup: BeautifulSoup, selectors: tuple[str, ...]) -> str | None:
+    for selector in selectors:
+        node = soup.select_one(selector)
+        if not node:
+            continue
+        value = node.get("content") or node.get("value") or node.get_text(" ", strip=True)
+        if value and str(value).strip():
+            return str(value).strip()
+    return None
+
+
+def storefront_image(soup: BeautifulSoup) -> str | None:
+    for selector in (
+        "#landingImage",  # Amazon
+        "#imgTagWrapperId img",
+        "[data-testid='product-image'] img",
+        ".product-gallery img",
+        ".woocommerce-product-gallery img",
+        "main img[itemprop='image']",
+    ):
+        node = soup.select_one(selector)
+        if not node:
+            continue
+        image = node.get("data-old-hires") or node.get("src") or node.get("data-src")
+        if image:
+            return str(image).strip()
+        dynamic_images = node.get("data-a-dynamic-image")
+        if dynamic_images:
+            try:
+                candidates = json.loads(str(dynamic_images))
+                if isinstance(candidates, dict) and candidates:
+                    return str(next(iter(candidates)))
+            except (json.JSONDecodeError, TypeError):
+                pass
+    return None
+
+
+def infer_currency(price_value: Any, final_url: str) -> str | None:
+    text = str(price_value or "")
+    hostname = (urlsplit(final_url).hostname or "").lower()
+    explicit_codes = re.search(r"\b(USD|EUR|GBP|INR|LKR|AUD|CAD|JPY)\b", text, re.IGNORECASE)
+    if explicit_codes:
+        return explicit_codes.group(1).upper()
+    if "amazon.in" in hostname or "₹" in text:
+        return "INR"
+    if hostname.endswith(".lk") or re.search(r"\b(?:LKR|Rs\.)", text, re.IGNORECASE):
+        return "LKR"
+    for symbol, code in (("£", "GBP"), ("€", "EUR"), ("¥", "JPY"), ("$", "USD")):
+        if symbol in text:
+            return code
     return None
 
 
@@ -211,6 +324,18 @@ def extract_product(html: str, final_url: str) -> ScrapedProduct:
     title = product.get("name") or meta_content(soup, "og:title", "twitter:title")
     if not title and soup.title:
         title = soup.title.get_text(" ", strip=True)
+    if not title:
+        title = storefront_text(
+            soup,
+            (
+                "#productTitle",  # Amazon
+                "[data-testid='product-title']",
+                "h1[itemprop='name']",
+                ".product-title",
+                ".product_title",
+                "main h1",
+            ),
+        )
     title = str(title).strip()[:255] if title else None
 
     price_value = (
@@ -222,6 +347,23 @@ def extract_product(html: str, final_url: str) -> ScrapedProduct:
         price_node = soup.find(attrs={"itemprop": "price"})
         if price_node:
             price_value = price_node.get("content") or price_node.get_text(" ", strip=True)
+    if price_value is None:
+        price_value = embedded_price(soup)
+    if price_value is None:
+        price_value = storefront_text(
+            soup,
+            (
+                ".priceToPay .a-offscreen",  # Amazon
+                "#corePrice_feature_div .a-offscreen",
+                ".a-price .a-offscreen",
+                "[data-testid='product-price']",
+                "[itemprop='price']",
+                ".woocommerce-Price-amount",
+                ".x-price-primary span",  # eBay
+                ".product-price",
+                ".sale-price",
+            ),
+        )
     price = parse_price(price_value)
 
     currency = (
@@ -229,12 +371,15 @@ def extract_product(html: str, final_url: str) -> ScrapedProduct:
         or meta_content(soup, "product:price:currency", "og:price:currency")
     )
     currency = str(currency).upper()[:10] if currency else None
+    currency = currency or infer_currency(price_value, final_url)
 
     image = product.get("image") or meta_content(soup, "og:image", "twitter:image")
     if isinstance(image, list):
         image = next((item for item in image if item), None)
     if isinstance(image, dict):
         image = image.get("url") or image.get("contentUrl")
+    if not image:
+        image = storefront_image(soup)
     image_url = urljoin(final_url, str(image).strip()) if image else None
 
     availability = offer.get("availability") or meta_content(soup, "product:availability")
@@ -244,6 +389,17 @@ def extract_product(html: str, final_url: str) -> ScrapedProduct:
         )
         if availability_node:
             availability = availability_node.get("content") or availability_node.get_text(" ", strip=True)
+    if availability is None:
+        availability = storefront_text(
+            soup,
+            (
+                "#availability span",  # Amazon
+                "[data-testid='availability']",
+                "[itemprop='availability']",
+                ".stock",
+                ".product-stock",
+            ),
+        )
     if availability is None:
         visible_text = soup.get_text(" ", strip=True)[:200_000].lower()
         if "out of stock" in visible_text or "sold out" in visible_text:
@@ -306,6 +462,7 @@ async def scrape_product(
             headers={
                 "User-Agent": settings.scraper_user_agent,
                 "Accept": "text/html,application/xhtml+xml",
+                "Accept-Language": "en-US,en;q=0.9",
             },
             follow_redirects=False,
         )
@@ -318,6 +475,7 @@ async def scrape_product(
                 headers={
                     "User-Agent": settings.scraper_user_agent,
                     "Accept": "text/html,application/xhtml+xml",
+                    "Accept-Language": "en-US,en;q=0.9",
                 },
             ) as response:
                 if response.status_code in BLOCKED_STATUSES:

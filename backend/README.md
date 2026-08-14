@@ -26,12 +26,40 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 5000
 
 The API documentation is available at `http://localhost:5000/docs`.
 
+## AI buy-or-wait advisor
+
+Each product card can request an AI recommendation based on its current price,
+target price, stock state, and up to 20 recorded prices. Put the key only in
+`backend/.env` (never in the React frontend):
+
+```bash
+NILIFY_GEMINI_API_KEY=your_gemini_api_key
+NILIFY_GEMINI_MODEL=gemini-3.6-flash
+NILIFY_GEMINI_TIMEOUT_SECONDS=30
+```
+
+Restart the backend after changing `.env`. AI advice is optional; all product
+tracking features continue to work when no key is configured.
+
 ## Authentication endpoints
 
 - `POST /api/auth/register` — create an account
 - `POST /api/auth/login` — set an HttpOnly authentication cookie and return `{ user }`
 - `POST /api/auth/token` — receive `{ token, user }` for non-browser bearer clients
 - `GET /api/auth/me` — validate a bearer token and return the current user
+
+## User and admin roles
+
+Registered accounts always receive the `user` role. Apply migrations, register the
+first administrator normally, and promote that existing account from the backend:
+
+```bash
+alembic upgrade head
+python -m app.scripts.promote_admin admin@example.com --confirm
+```
+
+Admin routes use a reusable role dependency and return HTTP 403 to normal users.
+Never expose role selection on public registration forms.
 
 ## Product tracking endpoints
 

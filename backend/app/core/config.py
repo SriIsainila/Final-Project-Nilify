@@ -1,13 +1,17 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, computed_field
+from pydantic import AliasChoices, Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=BACKEND_DIR / ".env",
         env_file_encoding="utf-8",
         env_prefix="NILIFY_",
         case_sensitive=False,
@@ -46,6 +50,37 @@ class Settings(BaseSettings):
     scraper_max_bytes: int = Field(default=5_000_000, ge=10_000, le=20_000_000)
     scraper_max_redirects: int = Field(default=3, ge=0, le=10)
     scraper_user_agent: str = "NilifyPriceMonitor/1.0"
+
+    # Empty by default so the core tracking service runs without AI configured.
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.6-flash"
+    gemini_timeout_seconds: float = Field(default=30.0, ge=5, le=120)
+
+    payhere_merchant_id: str = Field(
+        default="",
+        validation_alias=AliasChoices("PAYHERE_MERCHANT_ID", "NILIFY_PAYHERE_MERCHANT_ID"),
+    )
+    payhere_merchant_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices("PAYHERE_MERCHANT_SECRET", "NILIFY_PAYHERE_MERCHANT_SECRET"),
+    )
+    payhere_sandbox: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("PAYHERE_SANDBOX", "NILIFY_PAYHERE_SANDBOX"),
+    )
+    public_backend_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("PUBLIC_BACKEND_URL", "NILIFY_PUBLIC_BACKEND_URL"),
+    )
+    frontend_url: str = "http://localhost:5173"
+
+    smtp_host: str = ""
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_use_tls: bool = True
+    password_reset_expire_minutes: int = Field(default=30, ge=5, le=1440)
 
     @computed_field
     @property

@@ -14,6 +14,7 @@ class NotificationRead(BaseModel):
     change_type: str | None
     item_id: int | None
     item_title: str | None
+    item_url: str | None
 
 
 class NotificationStatusResponse(BaseModel):

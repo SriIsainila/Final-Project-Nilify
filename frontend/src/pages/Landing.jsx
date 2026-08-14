@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { CheckCircle2, Clock3, History, Link2, MailCheck, ScanEye } from 'lucide-react'
+import { BellRing, CheckCircle2, Link2, MailCheck, ScanEye } from 'lucide-react'
 
 const steps = [
   {
@@ -19,12 +19,39 @@ const steps = [
   },
 ]
 
+const stars = [
+  { x: '4%', y: '18%', size: 5, delay: '0s', duration: '7s' },
+  { x: '12%', y: '72%', size: 3, delay: '-2s', duration: '8s' },
+  { x: '25%', y: '9%', size: 4, delay: '-4s', duration: '9s' },
+  { x: '43%', y: '82%', size: 5, delay: '-1s', duration: '10s' },
+  { x: '58%', y: '14%', size: 3, delay: '-5s', duration: '7s' },
+  { x: '72%', y: '75%', size: 4, delay: '-3s', duration: '9s' },
+  { x: '86%', y: '12%', size: 5, delay: '-6s', duration: '11s' },
+  { x: '95%', y: '60%', size: 3, delay: '-2s', duration: '8s' },
+]
+
 export default function Landing() {
   return (
     <div>
       {/* Hero */}
-      <section className="max-w-6xl mx-auto px-6 pt-20 pb-24 grid md:grid-cols-2 gap-12 items-center">
-        <div>
+      <section className="landing-hero max-w-6xl mx-auto px-6 pt-20 pb-24 grid md:grid-cols-2 gap-12 items-center">
+        <div className="star-field" aria-hidden="true">
+          {stars.map((star, index) => (
+            <span
+              key={index}
+              className="moving-star"
+              style={{
+                '--star-x': star.x,
+                '--star-y': star.y,
+                '--star-size': `${star.size}px`,
+                '--star-delay': star.delay,
+                '--star-duration': star.duration,
+              }}
+            />
+          ))}
+        </div>
+
+        <div className="relative z-10">
           <p className="inline-block text-xs font-semibold tracking-widest uppercase text-gold bg-gold/10 px-3 py-1 rounded-full mb-6">
             Never overpay again
           </p>
@@ -53,51 +80,30 @@ export default function Landing() {
           </div>
         </div>
 
-        <div className="bg-night-surface border border-ink/10 shadow-sm rounded-2xl p-6">
-          <div className="flex items-center justify-between gap-4 mb-5">
-            <div>
-              <p className="text-xs uppercase tracking-wide text-muted mb-1">URL check history</p>
-              <h3 className="font-medium">daraz.lk/products/...</h3>
-            </div>
-            <History size={22} className="text-gold flex-shrink-0" />
+        <div className="hero-visual relative z-10">
+          <div className="hero-image-frame">
+            <img
+              src="/smart-shopping-hero.png"
+              alt="A shopper ordering a product using a smart price tracking system"
+              className="hero-shopping-image"
+            />
           </div>
 
-          <div className="relative ml-2 space-y-5 before:absolute before:left-[7px] before:top-3 before:bottom-3 before:w-px before:bg-gold/25">
-            <div className="relative flex items-start gap-3">
-              <span className="relative z-10 mt-1 w-4 h-4 rounded-full bg-gold flex items-center justify-center">
-                <CheckCircle2 size={11} className="text-white" />
-              </span>
-              <div>
-                <p className="text-sm font-medium">URL added for tracking</p>
-                <p className="text-xs text-muted">Today, 9:00 AM</p>
-              </div>
-            </div>
-            <div className="relative flex items-start gap-3">
-              <span className="relative z-10 mt-1 w-4 h-4 rounded-full bg-gold flex items-center justify-center">
-                <ScanEye size={10} className="text-white" />
-              </span>
-              <div>
-                <p className="text-sm font-medium">Product URL checked</p>
-                <p className="text-xs text-muted">Today, 9:05 AM</p>
-              </div>
-            </div>
-            <div className="relative flex items-start gap-3">
-              <span className="relative z-10 mt-1 w-4 h-4 rounded-full bg-night-surface-2 border border-gold/30 flex items-center justify-center">
-                <Clock3 size={10} className="text-gold" />
-              </span>
-              <div>
-                <p className="text-sm font-medium">Next check scheduled</p>
-                <p className="text-xs text-muted">Today, 9:10 AM</p>
-              </div>
-            </div>
+          <div className="hero-alert hero-alert-top" aria-hidden="true">
+            <span className="hero-alert-icon"><BellRing size={16} /></span>
+            <span>
+              <strong>Price drop detected</strong>
+              <small>Your tracked item just changed</small>
+            </span>
           </div>
 
-          <Link
-            to="/dashboard"
-            className="inline-flex mt-5 text-sm font-semibold text-gold hover:text-gold-soft focus-ring rounded"
-          >
-            View tracked URL history →
-          </Link>
+          <div className="hero-alert hero-alert-bottom" aria-hidden="true">
+            <span className="hero-alert-icon hero-alert-icon-check"><CheckCircle2 size={16} /></span>
+            <span>
+              <strong>Smart tracking active</strong>
+              <small>We keep watching for you</small>
+            </span>
+          </div>
         </div>
       </section>
 

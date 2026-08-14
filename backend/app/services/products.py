@@ -1,13 +1,15 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ApplicationError
 from app.models.tracked_item import TrackedItem
+from app.models.user import User
 from app.schemas.product import ProductCreate, ProductUpdate
 from app.utils.urls import hostname_from_url, normalize_product_url
+from app.services.billing import plan_url_limit
 
 
 DUPLICATE_URL = "You are already tracking this URL"
@@ -52,8 +54,28 @@ async def ensure_url_available(
 
 
 async def create_product(session: AsyncSession, user_id: int, payload: ProductCreate) -> TrackedItem:
+    user = await session.scalar(select(User).where(User.user_id == user_id).with_for_update())
+    if user is None:
+        raise ApplicationError("User account not found", status_code=404)
     normalized_url = normalize_product_url(payload.url)
     await ensure_url_available(session, user_id, normalized_url)
+    if user.subscription_status == "active":
+        url_limit = plan_url_limit(user.subscription_plan)
+        tracked_count = await session.scalar(
+            select(func.count()).select_from(TrackedItem).where(TrackedItem.user_id == user_id)
+        )
+        if url_limit is not None and (tracked_count or 0) >= url_limit:
+            raise ApplicationError(
+                f"Your current subscription allows up to {url_limit} tracked URL(s). Upgrade your plan to add more.",
+                status_code=402,
+                details={"subscription_required": True, "url_limit": url_limit},
+            )
+    if user.free_tracking_used >= 3 and user.subscription_status != "active":
+        raise ApplicationError(
+            "Your 3 free product tracking uses are finished. Choose a subscription to continue.",
+            status_code=402,
+            details={"subscription_required": True},
+        )
 
     hostname = hostname_from_url(normalized_url)
     item = TrackedItem(
@@ -72,6 +94,8 @@ async def create_product(session: AsyncSession, user_id: int, payload: ProductCr
         next_check_at=datetime.now(UTC),
     )
     session.add(item)
+    if user.subscription_status != "active":
+        user.free_tracking_used += 1
     try:
         await session.commit()
     except IntegrityError as error:

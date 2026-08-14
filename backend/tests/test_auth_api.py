@@ -21,7 +21,7 @@ def remove_test_user(email: str) -> None:
 @pytest.mark.asyncio
 async def test_complete_authentication_flow() -> None:
     email = f"auth-{uuid4().hex}@example.com"
-    password = "correct-horse-battery"
+    password = "Correct-horse-battery1"
 
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -32,6 +32,7 @@ async def test_complete_authentication_flow() -> None:
             assert register.status_code == 201, register.text
             assert register.json()["user"]["name"] == "Test User"
             assert register.json()["user"]["email"] == email
+            assert register.json()["user"]["role"] == "user"
             assert "password" not in register.text
 
             duplicate = await client.post(
@@ -43,7 +44,7 @@ async def test_complete_authentication_flow() -> None:
 
             wrong_login = await client.post(
                 "/api/auth/login",
-                json={"email": email, "password": "incorrect-password"},
+                json={"email": email, "password": "Incorrect-password1"},
             )
             assert wrong_login.status_code == 401
             assert wrong_login.json()["message"] == "Invalid email or password"
@@ -108,3 +109,46 @@ async def test_registration_validation_error_shape() -> None:
     assert response.status_code == 422
     assert response.json()["message"] == "Validation failed"
     assert isinstance(response.json()["details"], list)
+
+
+@pytest.mark.asyncio
+async def test_admin_login_and_admin_route_authorization() -> None:
+    admin_email = f"admin-{uuid4().hex}@example.com"
+    user_email = f"user-{uuid4().hex}@example.com"
+    password = "Correct-horse-battery1"
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            for email in (admin_email, user_email):
+                response = await client.post(
+                    "/api/auth/register",
+                    json={"name": "Role Test", "email": email, "password": password},
+                )
+                assert response.status_code == 201, response.text
+
+            with psycopg.connect(database_dsn()) as connection:
+                connection.execute("UPDATE users SET role = 'admin' WHERE email = %s", (admin_email,))
+
+            normal_login = await client.post(
+                "/api/auth/token", json={"email": user_email, "password": password}
+            )
+            normal_token = normal_login.json()["token"]
+            forbidden = await client.get(
+                "/api/admin/dashboard", headers={"Authorization": f"Bearer {normal_token}"}
+            )
+            assert forbidden.status_code == 403
+
+            admin_login = await client.post(
+                "/api/auth/token", json={"email": admin_email, "password": password}
+            )
+            assert admin_login.status_code == 200, admin_login.text
+            assert admin_login.json()["user"]["role"] == "admin"
+            admin_token = admin_login.json()["token"]
+            dashboard = await client.get(
+                "/api/admin/dashboard", headers={"Authorization": f"Bearer {admin_token}"}
+            )
+            assert dashboard.status_code == 200, dashboard.text
+    finally:
+        await engine.dispose()
+        remove_test_user(admin_email)
+        remove_test_user(user_email)

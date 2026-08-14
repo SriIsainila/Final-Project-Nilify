@@ -76,6 +76,7 @@ class ProductRead(BaseModel):
     notify_channel: str
     check_frequency: int
     last_checked_at: datetime | None
+    tracking_error: str | None
     created_at: datetime
 
     @classmethod
@@ -95,6 +96,7 @@ class ProductRead(BaseModel):
             notify_channel=item.notify_channel,
             check_frequency=item.check_frequency,
             last_checked_at=item.last_checked_at,
+            tracking_error=item.last_error,
             created_at=item.created_at,
         )
 

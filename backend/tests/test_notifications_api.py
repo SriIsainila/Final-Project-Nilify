@@ -20,7 +20,7 @@ def remove_test_users(*emails: str) -> None:
 
 
 async def register_and_login(client: AsyncClient, email: str) -> tuple[int, str]:
-    password = "correct-horse-battery"
+    password = "Correct-horse-battery1"
     register = await client.post(
         "/api/auth/register",
         json={"name": "Notification Tester", "email": email, "password": password},

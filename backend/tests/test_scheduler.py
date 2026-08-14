@@ -62,7 +62,7 @@ def snapshot(
 @pytest.mark.asyncio
 async def test_scheduler_baseline_changes_deduplication_and_pausing() -> None:
     email = f"scheduler-{uuid4().hex}@example.com"
-    password = "correct-horse-battery"
+    password = "Correct-horse-battery1"
 
     baseline = snapshot(
         title="Product A",
@@ -116,16 +116,42 @@ async def test_scheduler_baseline_changes_deduplication_and_pausing() -> None:
             item_id = created.json()["id"]
             assert created.json()["check_frequency"] == 5
 
-            first = await process_due_items(scrape_baseline)
+            first = await process_due_items(scrape_baseline, [item_id])
             assert first.claimed == 1
             assert first.checked == 1
             assert first.changed == 0
             assert first.notifications == 0
 
+            async with AsyncSessionFactory() as session:
+                item = await session.get(TrackedItem, item_id)
+                assert item is not None
+                item.created_at = datetime.now(UTC) - timedelta(hours=13)
+                item.next_check_at = datetime.now(UTC) - timedelta(seconds=1)
+                await session.commit()
+
+            no_change = await process_due_items(scrape_baseline, [item_id])
+            assert no_change.claimed == 1
+            assert no_change.changed == 0
+            assert no_change.notifications == 1
+
+            await force_due(item_id)
+            no_change_again = await process_due_items(scrape_baseline, [item_id])
+            assert no_change_again.notifications == 0
+
+            async with AsyncSessionFactory() as session:
+                item = await session.get(TrackedItem, item_id)
+                assert item is not None
+                item.no_change_notified_at = datetime.now(UTC) - timedelta(hours=13)
+                item.next_check_at = datetime.now(UTC) - timedelta(seconds=1)
+                await session.commit()
+
+            next_no_change = await process_due_items(scrape_baseline, [item_id])
+            assert next_no_change.notifications == 1
+
             await force_due(item_id)
             concurrent = await asyncio.gather(
-                process_due_items(scrape_changed),
-                process_due_items(scrape_changed),
+                process_due_items(scrape_changed, [item_id]),
+                process_due_items(scrape_changed, [item_id]),
             )
             assert sum(result.claimed for result in concurrent) == 1
             assert sum(result.checked for result in concurrent) == 1
@@ -133,23 +159,35 @@ async def test_scheduler_baseline_changes_deduplication_and_pausing() -> None:
             assert sum(result.notifications for result in concurrent) == 5
 
             await force_due(item_id)
-            unchanged = await process_due_items(scrape_changed)
+            unchanged = await process_due_items(scrape_changed, [item_id])
             assert unchanged.claimed == 1
             assert unchanged.changed == 0
             assert unchanged.notifications == 0
 
             async with AsyncSessionFactory() as session:
-                change_count = await session.scalar(select(func.count()).select_from(ItemChange))
-                notification_count = await session.scalar(select(func.count()).select_from(Notification))
-                price_count = await session.scalar(select(func.count()).select_from(PriceHistory))
-                statuses = list((await session.execute(select(Notification.delivery_status))).scalars())
+                change_count = await session.scalar(
+                    select(func.count()).select_from(ItemChange).where(ItemChange.item_id == item_id)
+                )
+                notification_count = await session.scalar(
+                    select(func.count()).select_from(Notification).where(Notification.item_id == item_id)
+                )
+                price_count = await session.scalar(
+                    select(func.count()).select_from(PriceHistory).where(PriceHistory.item_id == item_id)
+                )
+                statuses = list(
+                    (
+                        await session.execute(
+                            select(Notification.delivery_status).where(Notification.item_id == item_id)
+                        )
+                    ).scalars()
+                )
                 assert change_count == 5
-                assert notification_count == 5
+                assert notification_count == 7
                 assert price_count == 2
-                assert statuses == ["pending"] * 5
+                assert statuses == ["pending"] * 7
 
             await force_due(item_id)
-            failed = await process_due_items(scrape_failure)
+            failed = await process_due_items(scrape_failure, [item_id])
             assert failed.claimed == 1
             assert failed.failed == 1
             async with AsyncSessionFactory() as session:
@@ -162,7 +200,7 @@ async def test_scheduler_baseline_changes_deduplication_and_pausing() -> None:
             disabled = await client.post(f"/api/products/{item_id}/disable", headers=headers)
             assert disabled.status_code == 200
             await force_due(item_id)
-            paused = await process_due_items(scrape_changed)
+            paused = await process_due_items(scrape_changed, [item_id])
             assert paused.claimed == 0
     finally:
         await engine.dispose()

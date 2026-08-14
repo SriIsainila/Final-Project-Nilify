@@ -23,6 +23,11 @@ class Notification(Base):
         BigInteger,
         ForeignKey("item_changes.change_id", ondelete="SET NULL"),
     )
+    item_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("tracked_items.item_id", ondelete="CASCADE"),
+        index=True,
+    )
     message: Mapped[str] = mapped_column(Text, nullable=False)
     channel: Mapped[str] = mapped_column(String(16), nullable=False)
     delivery_status: Mapped[str] = mapped_column(

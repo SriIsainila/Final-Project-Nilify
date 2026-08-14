@@ -28,7 +28,11 @@ export default function AddProduct() {
       await addTrackedProduct(form)
       navigate('/dashboard')
     } catch (err) {
-      setError(err.message || 'Could not add this product. Try again.')
+      if (err.message?.includes('3 free product tracking uses')) {
+        navigate('/pricing')
+      } else {
+        setError(err.message || 'Could not add this product. Try again.')
+      }
     } finally {
       setLoading(false)
     }
@@ -53,7 +57,7 @@ export default function AddProduct() {
             value={form.url}
             onChange={(e) => setForm({ ...form, url: e.target.value })}
             className="w-full bg-night-surface border border-ink/15 rounded-lg px-4 py-2.5 focus-ring outline-none"
-            placeholder="https://www.daraz.lk/products/..."
+            placeholder="https://www.products/..."
           />
         </div>
 

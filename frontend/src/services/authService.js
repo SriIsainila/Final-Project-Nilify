@@ -19,3 +19,13 @@ export async function logoutUser() {
   const { data } = await httpClient.post('/auth/logout')
   return data
 }
+
+export async function requestPasswordReset(email) {
+  const { data } = await httpClient.post('/auth/forgot-password', { email })
+  return data
+}
+
+export async function resetPassword(token, password) {
+  const { data } = await httpClient.post('/auth/reset-password', { token, password })
+  return data
+}

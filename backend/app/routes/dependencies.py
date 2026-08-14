@@ -42,3 +42,19 @@ async def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+async def require_normal_user(user: CurrentUser) -> User:
+    if user.role != "user":
+        raise ApplicationError("Normal user access required", status_code=403)
+    return user
+
+
+async def require_admin(user: CurrentUser) -> User:
+    if user.role != "admin":
+        raise ApplicationError("Administrator access required", status_code=403)
+    return user
+
+
+NormalUser = Annotated[User, Depends(require_normal_user)]
+AdminUser = Annotated[User, Depends(require_admin)]

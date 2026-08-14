@@ -6,7 +6,7 @@ from sqlalchemy import text
 
 from app.core.config import settings
 from app.database import engine
-from app.services.tracking_worker import process_active_items
+from app.services.tracking_worker import process_due_items
 
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,7 @@ async def run_scheduler_cycle() -> None:
             logger.info("Scheduler cycle skipped because another instance holds the lock")
             return
         try:
-            result = await process_active_items()
+            result = await process_due_items()
             logger.info(
                 "Tracking cycle complete: claimed=%s checked=%s changed=%s notifications=%s failed=%s",
                 result.claimed,

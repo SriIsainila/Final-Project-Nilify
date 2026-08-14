@@ -14,7 +14,11 @@ httpClient.interceptors.response.use(
       window.dispatchEvent(new Event('auth:unauthorized'))
     }
 
-    const message = error.response?.data?.message || error.message || 'Something went wrong'
+    const backendUnavailable = (!error.response && error.code === 'ERR_NETWORK')
+      || error.response?.status === 502
+    const message = backendUnavailable
+      ? 'Backend is unavailable. Start the API server on port 5000 and try again.'
+      : error.response?.data?.message || error.message || 'Something went wrong'
     return Promise.reject(new Error(message))
   },
 )

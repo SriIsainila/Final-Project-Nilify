@@ -1,8 +1,74 @@
-**/node_modules/
-**/dist/
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
 **/.env
+**/.env.*
+!**/.env.example
+
+# Python virtual environments
+.venv/
+venv/
+env/
 **/.venv/
+**/venv/
+
+# Python caches and generated files
+__pycache__/
 **/__pycache__/
 *.py[cod]
+*.pyd
+*.so
+.pytest_cache/
+**/.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.egg-info/
+
+# JavaScript dependencies and build output
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+build/
+**/build/
+coverage/
+**/coverage/
+.vite/
+**/.vite/
+
+# Deployment provider local state
+.vercel/
+**/.vercel/
+.render/
+**/.render/
+
+# Local databases, runtime files and logs
+*.db
+*.sqlite
+*.sqlite3
 *.log
+logs/
+tmp/
+temp/
+*.pid
+
+# IDE and editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Operating-system files
 .DS_Store
+Thumbs.db
+
+# Local certificates and keys
+*.pem
+*.key
+*.crt

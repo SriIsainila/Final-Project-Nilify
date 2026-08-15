@@ -21,10 +21,10 @@ alembic current
 Run the application:
 
 ```bash
-uvicorn app.main:app --reload --host 127.0.0.1 --port 5000
+uvicorn app.main:app --reload
 ```
 
-The API documentation is available at `http://localhost:5000/docs`.
+The API documentation is available at `http://localhost:8000/docs`.
 
 ## AI buy-or-wait advisor
 

@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     debug: bool = False
     api_prefix: str = "/api"
     host: str = "127.0.0.1"
-    port: int = Field(default=5000, ge=1, le=65535)
+    port: int = Field(default=8000, ge=1, le=65535)
 
     database_url: str
     database_echo: bool = False

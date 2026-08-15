@@ -10,7 +10,7 @@ cp .env.example .env
 ```
 
 Development requests use Vite's same-origin `/api` proxy, which forwards to
-`http://127.0.0.1:5000`. Set `VITE_API_BASE_URL` only when a deployed API is
+`http://127.0.0.1:8000`. Set `VITE_API_BASE_URL` only when a deployed API is
 hosted at a different origin.
 
 ## Run locally
@@ -39,7 +39,7 @@ npm run build
 
 ## Note on backend
 
-This frontend expects the backend on port `5000` during development, or at the
+This frontend expects the backend on port `8000` during development, or at the
 URL set in `VITE_API_BASE_URL` for a separate production API,
 with routes for `/auth/register`, `/auth/login`, `/auth/logout`, `/auth/me`,
 `/products`, and `/notifications`. Browser authentication uses an HttpOnly JWT

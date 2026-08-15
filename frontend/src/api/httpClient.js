@@ -17,7 +17,7 @@ httpClient.interceptors.response.use(
     const backendUnavailable = (!error.response && error.code === 'ERR_NETWORK')
       || error.response?.status === 502
     const message = backendUnavailable
-      ? 'Backend is unavailable. Start the API server on port 5000 and try again.'
+      ? 'Backend is unavailable. Start the API server on port 8000 and try again.'
       : error.response?.data?.message || error.message || 'Something went wrong'
     return Promise.reject(new Error(message))
   },

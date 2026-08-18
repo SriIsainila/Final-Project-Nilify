@@ -14,8 +14,7 @@
     "backend": {
       "root": "backend",
       "framework": "fastapi",
-      "entrypoint": "index:app",
-      "maxDuration": 300
+      "entrypoint": "index:app"
     }
   },
   "rewrites": [

@@ -1,8 +1,9 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from pydantic import AliasChoices, Field, computed_field
+from pydantic import AliasChoices, Field, computed_field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,6 +28,7 @@ class Settings(BaseSettings):
 
     database_url: str
     database_echo: bool = False
+    database_connect_timeout_seconds: float = Field(default=5.0, ge=1, le=60)
 
     jwt_secret: str = Field(min_length=32)
     jwt_algorithm: Literal["HS256", "HS384", "HS512"] = "HS256"
@@ -45,6 +47,10 @@ class Settings(BaseSettings):
     )
     scheduler_batch_size: int = Field(default=50, ge=1, le=500)
     scheduler_concurrency: int = Field(default=5, ge=1, le=20)
+    cron_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices("CRON_SECRET", "NILIFY_CRON_SECRET"),
+    )
 
     scraper_timeout_seconds: float = Field(default=15.0, ge=1, le=60)
     scraper_max_bytes: int = Field(default=5_000_000, ge=10_000, le=20_000_000)
@@ -81,6 +87,27 @@ class Settings(BaseSettings):
     smtp_from_email: str = ""
     smtp_use_tls: bool = True
     password_reset_expire_minutes: int = Field(default=30, ge=5, le=1440)
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def use_async_postgres_driver(cls, value: object) -> object:
+        """Accept managed-provider PostgreSQL URLs with SQLAlchemy's async engine."""
+        if not isinstance(value, str):
+            return value
+        if value.startswith("postgresql://"):
+            value = value.replace("postgresql://", "postgresql+asyncpg://", 1)
+        elif value.startswith("postgres://"):
+            value = value.replace("postgres://", "postgresql+asyncpg://", 1)
+
+        # Neon provides libpq parameters. asyncpg uses ``ssl`` instead of
+        # ``sslmode`` and does not accept ``channel_binding``.
+        parts = urlsplit(value)
+        query = []
+        for key, item in parse_qsl(parts.query, keep_blank_values=True):
+            if key == "channel_binding":
+                continue
+            query.append(("ssl" if key == "sslmode" else key, item))
+        return urlunsplit(parts._replace(query=urlencode(query)))
 
     @computed_field
     @property

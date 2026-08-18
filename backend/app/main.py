@@ -44,7 +44,7 @@ app.add_middleware(
 
 @app.get("/", include_in_schema=False)
 async def root() -> RedirectResponse:
-    return RedirectResponse(url="http://127.0.0.1:5173", status_code=307)
+    return RedirectResponse(url=settings.frontend_url, status_code=307)
 
 
 @app.get("/health", tags=["System"])

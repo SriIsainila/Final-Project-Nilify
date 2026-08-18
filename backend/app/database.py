@@ -9,6 +9,7 @@ engine = create_async_engine(
     settings.database_url,
     echo=settings.database_echo,
     pool_pre_ping=True,
+    connect_args={"timeout": settings.database_connect_timeout_seconds},
 )
 
 AsyncSessionFactory = async_sessionmaker(

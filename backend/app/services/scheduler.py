@@ -6,7 +6,7 @@ from sqlalchemy import text
 
 from app.core.config import settings
 from app.database import engine
-from app.services.tracking_worker import process_due_items
+from app.services.tracking_worker import WorkerResult, process_due_items
 
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ SCHEDULER_LOCK_ID = 6_142_093_517
 scheduler = AsyncIOScheduler(timezone="UTC")
 
 
-async def run_scheduler_cycle() -> None:
+async def run_scheduler_cycle() -> WorkerResult | None:
     async with engine.connect() as connection:
         acquired = await connection.scalar(
             text("SELECT pg_try_advisory_lock(:lock_id)"),
@@ -23,7 +23,7 @@ async def run_scheduler_cycle() -> None:
         )
         if not acquired:
             logger.info("Scheduler cycle skipped because another instance holds the lock")
-            return
+            return None
         try:
             result = await process_due_items()
             logger.info(
@@ -34,6 +34,7 @@ async def run_scheduler_cycle() -> None:
                 result.notifications,
                 result.failed,
             )
+            return result
         finally:
             await connection.execute(
                 text("SELECT pg_advisory_unlock(:lock_id)"),
